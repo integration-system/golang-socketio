@@ -3,8 +3,8 @@ package gosocketio
 import (
 	"encoding/json"
 	"errors"
-	"github.com/graarh/golang-socketio/protocol"
-	"github.com/graarh/golang-socketio/transport"
+	"github.com/integration-system/golang-socketio/protocol"
+	"github.com/integration-system/golang-socketio/transport"
 	"net/http"
 	"sync"
 	"time"
@@ -59,8 +59,7 @@ create channel, map, and set active
 func (c *Channel) initChannel() {
 	//TODO: queueBufferSize from constant to server or client variable
 	c.out = make(chan string, queueBufferSize)
-	c.ack.resultWaiters = make(map[int](chan string))
-	c.alive = true
+	c.ack.resultWaiters = make(map[int]chan string)
 }
 
 /**
@@ -78,6 +77,12 @@ func (c *Channel) IsAlive() bool {
 	defer c.aliveLock.Unlock()
 
 	return c.alive
+}
+
+func (c *Channel) SetAlive(alive bool) {
+	c.aliveLock.Lock()
+	c.alive = alive
+	c.aliveLock.Unlock()
 }
 
 /**
@@ -99,6 +104,7 @@ func closeChannel(c *Channel, m *methods, args ...interface{}) error {
 	for len(c.out) > 0 {
 		<-c.out
 	}
+	c.ack.resultWaiters = make(map[int]chan string) //clean ack map
 	c.out <- protocol.CloseMessage
 
 	m.callLoopEvent(c, OnDisconnection)
@@ -139,7 +145,7 @@ func inLoop(c *Channel, m *methods) error {
 	return nil
 }
 
-var overflooded map[*Channel]struct{} = make(map[*Channel]struct{})
+var overflooded = make(map[*Channel]struct{})
 var overfloodedLock sync.Mutex
 
 func AmountOfOverflooded() int64 {
@@ -185,12 +191,11 @@ Pinger sends ping messages for keeping connection alive
 */
 func pinger(c *Channel) {
 	for {
-		interval, _ := c.conn.PingParams()
-		time.Sleep(interval)
 		if !c.IsAlive() {
 			return
 		}
-
+		interval, _ := c.conn.PingParams()
+		time.Sleep(interval)
 		c.out <- protocol.PingMessage
 	}
 }

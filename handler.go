@@ -2,9 +2,9 @@ package gosocketio
 
 import (
 	"encoding/json"
-	"github.com/graarh/golang-socketio/protocol"
-	"sync"
+	"github.com/integration-system/golang-socketio/protocol"
 	"reflect"
+	"sync"
 )
 
 const (
@@ -22,7 +22,7 @@ type systemHandler func(c *Channel)
 Contains maps of message processing functions
 */
 type methods struct {
-	messageHandlers     map[string]*caller
+	messageHandlers     map[string][]*caller
 	messageHandlersLock sync.RWMutex
 
 	onConnection    systemHandler
@@ -33,7 +33,7 @@ type methods struct {
 create messageHandlers map
 */
 func (m *methods) initMethods() {
-	m.messageHandlers = make(map[string]*caller)
+	m.messageHandlers = make(map[string][]*caller)
 }
 
 /**
@@ -47,7 +47,11 @@ func (m *methods) On(method string, f interface{}) error {
 
 	m.messageHandlersLock.Lock()
 	defer m.messageHandlersLock.Unlock()
-	m.messageHandlers[method] = c
+	if arr, ok := m.messageHandlers[method]; ok {
+		m.messageHandlers[method] = append(arr, c)
+	} else {
+		m.messageHandlers[method] = []*caller{c}
+	}
 
 	return nil
 }
@@ -55,7 +59,7 @@ func (m *methods) On(method string, f interface{}) error {
 /**
 Find message processing function associated with given method
 */
-func (m *methods) findMethod(method string) (*caller, bool) {
+func (m *methods) findMethod(method string) ([]*caller, bool) {
 	m.messageHandlersLock.RLock()
 	defer m.messageHandlersLock.RUnlock()
 
@@ -71,12 +75,13 @@ func (m *methods) callLoopEvent(c *Channel, event string) {
 		m.onDisconnection(c)
 	}
 
-	f, ok := m.findMethod(event)
+	funcs, ok := m.findMethod(event)
 	if !ok {
 		return
 	}
-
-	f.callFunc(c, &struct{}{})
+	for _, f := range funcs {
+		f.callFunc(c, &struct{}{})
+	}
 }
 
 /**
@@ -88,42 +93,49 @@ On emit - look for processing function
 func (m *methods) processIncomingMessage(c *Channel, msg *protocol.Message) {
 	switch msg.Type {
 	case protocol.MessageTypeEmit:
-		f, ok := m.findMethod(msg.Method)
+		funcs, ok := m.findMethod(msg.Method)
 		if !ok {
 			return
 		}
 
-		if !f.ArgsPresent {
-			f.callFunc(c, &struct{}{})
-			return
-		}
+		for _, f := range funcs {
+			if !f.ArgsPresent {
+				f.callFunc(c, &struct{}{})
+				return
+			}
 
-		data := f.getArgs()
-		err := json.Unmarshal([]byte(msg.Args), &data)
-		if err != nil {
-			return
-		}
-
-		f.callFunc(c, data)
-
-	case protocol.MessageTypeAckRequest:
-		f, ok := m.findMethod(msg.Method)
-		if !ok || !f.Out {
-			return
-		}
-
-		var result []reflect.Value
-		if f.ArgsPresent {
-			//data type should be defined for unmarshall
 			data := f.getArgs()
 			err := json.Unmarshal([]byte(msg.Args), &data)
 			if err != nil {
 				return
 			}
 
-			result = f.callFunc(c, data)
-		} else {
-			result = f.callFunc(c, &struct{}{})
+			f.callFunc(c, data)
+		}
+
+	case protocol.MessageTypeAckRequest:
+		funcs, ok := m.findMethod(msg.Method)
+		if !ok {
+			return
+		}
+
+		var result []reflect.Value
+		for _, f := range funcs {
+			if !f.Out {
+				continue
+			}
+			if f.ArgsPresent {
+				//data type should be defined for unmarshall
+				data := f.getArgs()
+				err := json.Unmarshal([]byte(msg.Args), &data)
+				if err != nil {
+					return
+				}
+
+				result = f.callFunc(c, data)
+			} else {
+				result = f.callFunc(c, &struct{}{})
+			}
 		}
 
 		ack := &protocol.Message{

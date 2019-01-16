@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/graarh/golang-socketio/protocol"
-	"github.com/graarh/golang-socketio/transport"
+	"github.com/integration-system/golang-socketio/protocol"
+	"github.com/integration-system/golang-socketio/transport"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -43,7 +43,7 @@ type Server struct {
 
 /**
 Close current channel
- */
+*/
 func (c *Channel) Close() {
 	if c.server != nil {
 		closeChannel(c, &c.server.methods)
@@ -319,6 +319,7 @@ func (s *Server) SetupEventLoop(conn transport.Connection, remoteAddr string,
 	c.ip = remoteAddr
 	c.requestHeader = requestHeader
 	c.initChannel()
+	c.SetAlive(true)
 
 	c.server = s
 	c.header = hdr
