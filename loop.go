@@ -116,6 +116,32 @@ func closeChannel(c *Channel, m *methods, args ...interface{}) error {
 	return nil
 }
 
+func forceCloseChannel(c *Channel, m *methods) error {
+	c.aliveLock.Lock()
+	defer c.aliveLock.Unlock()
+
+	if !c.alive {
+		//already closed
+		return nil
+	}
+
+	c.conn.Close()
+	c.alive = false
+
+	//clean outloop
+	for len(c.out) > 0 {
+		<-c.out
+	}
+	c.ack.resultWaiters = make(map[int]chan string) //clean ack map
+	c.out <- protocol.CloseMessage
+
+	overfloodedLock.Lock()
+	delete(overflooded, c)
+	overfloodedLock.Unlock()
+
+	return nil
+}
+
 //incoming messages loop, puts incoming messages to In channel
 func inLoop(c *Channel, m *methods) error {
 	for {

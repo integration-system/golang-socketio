@@ -2,6 +2,7 @@ package gosocketio
 
 import (
 	"github.com/integration-system/golang-socketio/transport"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -26,7 +27,8 @@ type Client struct {
 	tr               transport.Transport
 	rp               *ReconnectionPolicy
 	reconnectChannel chan bool
-	url              string
+	urls             []string
+	currUrlIdx       *int
 	lock             sync.Mutex
 	open             bool
 }
@@ -77,7 +79,16 @@ func (cb *clientBuilder) BuildToConnect(targetUrl string) *Client {
 	if cb.client.rp.Enable {
 		cb.client.runReconnectionTask()
 	}
-	cb.client.url = targetUrl
+	cb.client.urls = []string{targetUrl}
+	return cb.client
+}
+
+func (cb *clientBuilder) BuildToConnectMany(urls []string) *Client {
+	cb.client.initChannel()
+	if cb.client.rp.Enable {
+		cb.client.runReconnectionTask()
+	}
+	cb.client.urls = urls
 	return cb.client
 }
 
@@ -105,7 +116,17 @@ func (c *Client) Dial() error {
 	defer c.lock.Unlock()
 
 	var err error
-	c.conn, err = c.tr.Connect(c.url)
+	if c.currUrlIdx == nil {
+		rand.Seed(time.Now().UnixNano())
+		n := rand.Intn(len(c.urls))
+		c.currUrlIdx = &n
+	} else {
+		*c.currUrlIdx += 1
+		if *c.currUrlIdx > len(c.urls)-1 {
+			*c.currUrlIdx = 0
+		}
+	}
+	c.conn, err = c.tr.Connect(c.urls[*c.currUrlIdx])
 	if err != nil {
 		return err
 	}
@@ -130,16 +151,23 @@ func (c *Client) Close() {
 
 	if c.open {
 		c.open = false
-		close(c.reconnectChannel)
-		closeChannel(&c.Channel, &c.methods)
+		if c.rp.Enable && c.reconnectChannel != nil {
+			close(c.reconnectChannel)
+		}
+		_ = forceCloseChannel(&c.Channel, &c.methods)
 	}
 }
 
 func (c *Client) runReconnectionTask() {
 	c.reconnectChannel = make(chan bool)
 	c.onDisconnection = func(channel *Channel) {
-		if c.open {
-			c.reconnectChannel <- true
+		select {
+		case _, ok := <-c.reconnectChannel:
+			if ok && c.open {
+				c.reconnectChannel <- true
+			}
+		default:
+
 		}
 	}
 	go func() {
