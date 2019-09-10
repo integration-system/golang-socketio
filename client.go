@@ -18,6 +18,8 @@ const (
 	defaultReconnectionTimeout = 3 * time.Second
 )
 
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 /**
 Socket.io client representation
 */
@@ -28,7 +30,7 @@ type Client struct {
 	rp               *ReconnectionPolicy
 	reconnectChannel chan bool
 	urls             []string
-	currUrlIdx       *int
+	currUrlIdx       int
 	lock             sync.Mutex
 	open             bool
 }
@@ -98,6 +100,7 @@ func NewClientBuilder() *clientBuilder {
 		rp: &ReconnectionPolicy{
 			Enable: false,
 		},
+		currUrlIdx: -1,
 	}
 	c.initMethods()
 	return &clientBuilder{client: c}
@@ -116,17 +119,15 @@ func (c *Client) Dial() error {
 	defer c.lock.Unlock()
 
 	var err error
-	if c.currUrlIdx == nil {
-		rand.Seed(time.Now().UnixNano())
-		n := rand.Intn(len(c.urls))
-		c.currUrlIdx = &n
+	if c.currUrlIdx == -1 {
+		c.currUrlIdx = rnd.Intn(len(c.urls))
 	} else {
-		*c.currUrlIdx += 1
-		if *c.currUrlIdx > len(c.urls)-1 {
-			*c.currUrlIdx = 0
+		c.currUrlIdx += 1
+		if c.currUrlIdx > len(c.urls)-1 {
+			c.currUrlIdx = 0
 		}
 	}
-	c.conn, err = c.tr.Connect(c.urls[*c.currUrlIdx])
+	c.conn, err = c.tr.Connect(c.urls[c.currUrlIdx])
 	if err != nil {
 		return err
 	}

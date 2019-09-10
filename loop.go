@@ -88,7 +88,7 @@ func (c *Channel) SetAlive(alive bool) {
 /**
 Close channel
 */
-func closeChannel(c *Channel, m *methods, args ...interface{}) error {
+func closeChannelWithCallback(c *Channel, m *methods, callback func(*Channel, *methods)) error {
 	c.aliveLock.Lock()
 	defer c.aliveLock.Unlock()
 
@@ -107,7 +107,9 @@ func closeChannel(c *Channel, m *methods, args ...interface{}) error {
 	c.ack.resultWaiters = make(map[int]chan string) //clean ack map
 	c.out <- protocol.CloseMessage
 
-	m.callLoopEvent(c, OnDisconnection)
+	if callback != nil {
+		callback(c, m)
+	}
 
 	overfloodedLock.Lock()
 	delete(overflooded, c)
@@ -116,30 +118,15 @@ func closeChannel(c *Channel, m *methods, args ...interface{}) error {
 	return nil
 }
 
+func closeChannel(c *Channel, m *methods, args ...interface{}) error {
+	return closeChannelWithCallback(c, m, func(channel *Channel, methods *methods) {
+		methods.callLoopEvent(channel, OnDisconnection)
+
+	})
+}
+
 func forceCloseChannel(c *Channel, m *methods) error {
-	c.aliveLock.Lock()
-	defer c.aliveLock.Unlock()
-
-	if !c.alive {
-		//already closed
-		return nil
-	}
-
-	c.conn.Close()
-	c.alive = false
-
-	//clean outloop
-	for len(c.out) > 0 {
-		<-c.out
-	}
-	c.ack.resultWaiters = make(map[int]chan string) //clean ack map
-	c.out <- protocol.CloseMessage
-
-	overfloodedLock.Lock()
-	delete(overflooded, c)
-	overfloodedLock.Unlock()
-
-	return nil
+	return closeChannelWithCallback(c, m, nil)
 }
 
 //incoming messages loop, puts incoming messages to In channel
