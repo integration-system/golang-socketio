@@ -162,13 +162,8 @@ func (c *Client) Close() {
 func (c *Client) runReconnectionTask() {
 	c.reconnectChannel = make(chan bool)
 	c.onDisconnection = func(channel *Channel) {
-		select {
-		case _, ok := <-c.reconnectChannel:
-			if ok && c.open {
-				c.reconnectChannel <- true
-			}
-		default:
-
+		if c.open {
+			c.reconnectChannel <- true
 		}
 	}
 	go func() {

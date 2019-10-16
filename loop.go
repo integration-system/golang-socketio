@@ -121,7 +121,6 @@ func closeChannelWithCallback(c *Channel, m *methods, callback func(*Channel, *m
 func closeChannel(c *Channel, m *methods, args ...interface{}) error {
 	return closeChannelWithCallback(c, m, func(channel *Channel, methods *methods) {
 		methods.callLoopEvent(channel, OnDisconnection)
-
 	})
 }
 
